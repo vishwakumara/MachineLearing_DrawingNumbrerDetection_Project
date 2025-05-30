@@ -1,10 +1,16 @@
 import re
 import base64
-from flask import Flask, render_template,request
+import numpy as np
 import cv2
 import joblib
+from flask import Flask, render_template, request, jsonify
 
-model=joblib.load('KNN-Handwritten-Written-Digits.sav')
+# Load the trained model
+try:
+    model = joblib.load('KNN-Handwritten-Written-Digits.sav')
+except Exception as e:
+    print("Model loading failed:", e)
+    model = None
 
 app = Flask(__name__)
 
@@ -12,26 +18,37 @@ app = Flask(__name__)
 def index():
     return render_template('drawdigits.html')
 
-@app.route('/predictdigits/', methods=['GET','POST'])
+@app.route('/predictdigits/', methods=['POST'])
 def predict_digits():
-    parseImage(request.get_data())
-    
-    img=cv2.imread('output.png')
-    img=cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-    img=cv2.resize(img,(8,8))
-    img=img.reshape(1,64)
-    img=(img/255.0)*15.0
-    img=15-img
+    if not model:
+        return "Model not loaded", 500
 
-    prediction=model.predict(img)
+    if request.method == 'POST':
+        try:
+            parseImage(request.get_data())
+            
+            img = cv2.imread('output.png', cv2.IMREAD_GRAYSCALE)
+            if img is None:
+                return "Image processing failed", 400
+            
+            img = cv2.resize(img, (8, 8))
+            img = img.reshape(1, 64).astype(np.float32)
+            img = (img / 255.0) * 15.0
+            img = 15 - img  # Invert for compatibility with training data
 
-    return str(prediction[0])
+            prediction = model.predict(img)
+            return str(prediction[0])
+        except Exception as e:
+            return f"Prediction failed: {str(e)}", 500
 
 def parseImage(imgData):
-    # parse canvas bytes and save as output.png
-    imgstr = re.search(b'base64,(.*)', imgData).group(1)
-    with open('output.png','wb') as output:
-        output.write(base64.decodebytes(imgstr))
+    # Parse base64 image and save as 'output.png'
+    try:
+        imgstr = re.search(b'base64,(.*)', imgData).group(1)
+        with open('output.png', 'wb') as output:
+            output.write(base64.decodebytes(imgstr))
+    except Exception as e:
+        raise ValueError("Failed to decode image: " + str(e))
 
 if __name__ == '__main__':
     app.run(debug=True)
